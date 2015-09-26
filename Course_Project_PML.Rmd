@@ -1,0 +1,146 @@
+---
+title: "Course Project for Practical Machine Learning"
+author: "AV"
+date: "September 25, 2015"
+output: html_document
+---
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project,  data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants are used. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+##Objective
+
+The primary purpose of this project to build a Classifier, using Machine Learning, that correctly predicts the class of exercise performed by a user, given some characteristic data elements about the exercise, like accelerometer data.
+
+The source data for this project was provided by  http://groupware.les.inf.puc-rio.br/har. I would like to express my gratitude for making this data publicly available. It goes a long way towards realizing practical applications of machine learning.
+
+```{r,warning=FALSE,message=FALSE}
+library(caret)
+library(randomForest)
+library(Hmisc)
+library(corrplot)
+library(ggplot2)
+library(knitr)
+```
+
+##Loading and Cleaning the Data
+
+I have downlaoded the .csv files from the source Website onto my local machine, and use the file.choose() command to navigate to the appropriate file. A quick glance of the raw data indicates that the data file will require some cleaning. The first step is to transform the various versions of NA values like "NA","#DIV/0!" etc into a single "NA" bucket. We then load this data into a dataframe
+
+```{r,warning=FALSE,message=FALSE}
+pml_training_full<-read.csv(file.choose(),na.strings=c("NA","#DIV/0!",""))
+```
+  
+At this point some common, yet useful commands can be used to get an initial feel for the data.  
+
+```{r,warning=FALSE,message=FALSE,results='hide'}
+head(pml_training_full)
+str(pml_training_full)
+summary(pml_training_full)
+```  
+
+There seem to be various columns of data that very sparsely populated. I have made the decision to remove any columns of data where over 50% of the values are NA. Given that the raw data set has 19,622 records, the 50% threshold is approximately 10,000 and any columns with a total of NA values above this threshold have been removed.  
+Further, the data shows that the first few columns of the data set are identifiers that likely will have no bearing on the accuracy of the classifier. Hence the first 7 columns that include row number, name, timestamp, window have been removed. 
+ 
+```{r,warning=FALSE,message=FALSE}
+pml_training_clean<-pml_training_full[!colSums(is.na(pml_training_full)) > 10000]
+pml_training_clean<-pml_training_clean[,-c(1:7)]
+```  
+
+Prior to running the clean up commands, the original data set had 19,622 observations, and 160 variables. After the cleanup, the clean data set has 19,622 observations and 53 variables, so a significant reduction of dimensions has occured.
+
+##Exploratory Analysis
+
+Below are some preliminary exploratory plots that help us visualize the data. 
+
+
+```{r,warning=FALSE,message=FALSE,fig.height=5.0,fig.width=5.0}
+TrainCor<-cor(pml_training_clean[,-c(53)])
+corrplot(TrainCor, type="lower",order="FPC",sig.level = 0.01, insig = "blank", tl.pos = "n",title="Correlation Plot",mar=c(0,0,1,0))
+```
+
+The correlation plot shows some pockets of strong correlation. The only ones marked in the plots are those that meet a significance threshold of 0.01.
+
+```{r,warning=FALSE,message=FALSE,fig.height=4.0,fig.width=4.0}
+ggplot(data=pml_training_clean, aes(pml_training_clean$classe)) + 
+  geom_histogram(col="red", 
+                 fill="blue", 
+                 alpha = .5) + 
+  labs(title="Class Distribution") +
+  labs(x="Class", y="Count")
+``` 
+
+The Frequency distribution of the classes indicate that the classes are fairly balanced, with Class 'A' being the dominant class.
+
+
+##Splitting into Training and Test data
+
+We now proceed to split the clean data set into Training and Test data sets, so we can evaluate our Classifier prior to running it on the final test set for this course.
+
+```{r,warning=FALSE,message=FALSE}
+set.seed(1000)
+trainIndex <- createDataPartition(pml_training_full$classe, p = .7,
+                                  list = FALSE,
+                                  times = 1)
+
+dataTrain <- pml_training_clean[ trainIndex,]
+dataTest  <- pml_training_clean[-trainIndex,]
+```
+
+
+##Cross Validation
+
+```{r,eval=FALSE}
+ctrl <- trainControl(method = "repeatedcv",number=10,repeats = 2)
+```
+
+There are several methods to incorporate cross validation into a training routine. The process of splitting the data into k-folds and repeating it number of times is called Repeated k-fold Cross Validation. This is the method that has been used to train this model.I have set the number of folds to be 10, and the process to be repeated twice. Once the model has been created, we can evaulate the accuracy at each fold. The overall model accuracy is the mean of the accuracy across all folds.
+
+##Training the Model
+
+RandomForest was chosen to build our classifer model because it has good out of box accuracy, is fairly robust,and was one of the models demonstarted in the coursework.  
+
+```{r,eval=FALSE}
+rf_Fit <- train(dataTrain$classe ~ .,data = dataTrain,method = "rf",tuneGrid=data.frame(mtry=3), importance=TRUE,tuneLength = 3,trControl = ctrl,metric = "Accuracy") 
+```
+
+##Evaluating the Model
+
+There are a couple of steps we can complete to evaluate the Model,as well as understand the model itself. The steps taken are listed below, along with the results.
+
+1) Use a Confusion Matrix to evaluate Accuracy, and calculate the Out of Sample Error
+2) Plot the variable importance of the Final Model to understand top features that contribute towards accuracy
+3) Evaluate the accuracy at each of the k-folds used in cross validation
+
+```{r,echo=FALSE}
+load("C:/Users/avalsarajan/Desktop/Data Science/Coursera/8.Machine Learning/rf_Fit.RData")
+```
+
+```{r}
+print(rf_Fit$results)
+print(rf_Fit$finalModel)
+varImpPlot(rf_Fit$finalModel,main='Variable Importance Plots',cex=0.6)
+```
+
+The first Accuracy number of 99.23% is the mean accuracy across the k-folds of data we trained the model on. The error estimate in this case would be (1-Accuracy)=0.78%. Since the RandomForest algorithm automatically creates an Out of Bag (OOB) sample for determining accuracy, we can determine that the OOB error for the final Model is 0.69%. Further we observe that the top 4 variables impacting accuracy in this model are 'yaw belt','roll belt','pitch belt' and 'magnet dumbell_z', from the Variable Importance plot.
+
+However, since we have also manually set aside 30% of our training data to test out the mode, we can use that also to evaluate the accuracy and out of sample error.
+
+We first create the predictions for the 30% test data, and then evaluate the Confusion matrix of results.
+
+```{r}
+rf_Pred<-predict(rf_Fit, newdata = dataTest)
+confusionMatrix(rf_Pred, dataTest$classe)
+```
+
+We observe the Out of sample error in this case to be (1-Accuracy) = 0.007 = 0.7% , a highly accurate model.
+
+To evaluate our k-folds, and also compute an out of sample error rate using cross validation, we take the mean of the accuracy of the 10 Folds, repeated 2 times. That mean turns out to be 0.9923, which means the error rate is (1-Accuracy) = 0.77%. below are the results of each fold.
+
+```{r}
+kable(rf_Fit$resample,align=c('l','c','c'))
+```
+
+In conclusion, the Classifier built seems very accurate, with an out of sample error rate less than 1%. We can now use this final model to predict the Classes of the final test set for this course( results submitted separately).
+
